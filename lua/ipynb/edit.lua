@@ -59,6 +59,9 @@ function M.unregister_edit_buffer(edit_buf)
 end
 
 -- Install change tracking error suppression (called once)
+-- Uses vim.lsp._changetracking (internal API) when available, with pcall fallback.
+-- If the internal API changes in a future Neovim version, the wrapper silently
+-- becomes a no-op and set_facade_lines() still catches errors via its own pcall.
 local _changetracking_wrapped = false
 local function install_changetracking_wrapper()
   if _changetracking_wrapped then
@@ -66,10 +69,15 @@ local function install_changetracking_wrapper()
   end
   _changetracking_wrapped = true
 
-  -- Wrap the on_bytes handler that LSP sets up
-  -- We intercept at the point where changes are sent
-  local ct = vim.lsp._changetracking
-  if ct and ct.send_changes then
+  local ok, ct = pcall(function()
+    return vim.lsp._changetracking
+  end)
+  if not ok or not ct then
+    return
+  end
+
+  -- Try the current (0.10+) API shape: _changetracking.send_changes
+  if type(ct) == 'table' and type(ct.send_changes) == 'function' then
     local orig_send_changes = ct.send_changes
     ---@diagnostic disable-next-line: duplicate-set-field
     ct.send_changes = function(bufnr, ...)

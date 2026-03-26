@@ -4,6 +4,28 @@
 
 local M = {}
 
+-- Debounce timer for shadow file writes (avoids disk I/O on every keystroke)
+local write_timer = nil
+local WRITE_DEBOUNCE_MS = 200
+
+---Schedule a debounced write of shadow buffer to disk
+---@param shadow_buf number Shadow buffer number
+---@param shadow_path string Path to shadow file
+local function schedule_shadow_write(shadow_buf, shadow_path)
+  if write_timer then
+    vim.fn.timer_stop(write_timer)
+  end
+  write_timer = vim.fn.timer_start(WRITE_DEBOUNCE_MS, function()
+    write_timer = nil
+    vim.schedule(function()
+      if vim.api.nvim_buf_is_valid(shadow_buf) then
+        local all_lines = vim.api.nvim_buf_get_lines(shadow_buf, 0, -1, false)
+        vim.fn.writefile(all_lines, shadow_path)
+      end
+    end)
+  end)
+end
+
 ---Get language info from notebook metadata
 ---@param state NotebookState
 ---@return string language (e.g., "python", "julia", "r")
@@ -239,12 +261,24 @@ function M.sync_shadow_region(state, start_line, old_end_line, new_lines, cell_t
 
   vim.api.nvim_buf_set_lines(state.shadow_buf, start_line, old_end_line, false, shadow_lines)
 
-  -- Update temp file for LSP
-  local all_lines = vim.api.nvim_buf_get_lines(state.shadow_buf, 0, -1, false)
-  vim.fn.writefile(all_lines, state.shadow_path)
+  -- Debounce disk write (LSP reads from buffer, only some servers need the file)
+  schedule_shadow_write(state.shadow_buf, state.shadow_path)
 
   -- Clear modified to prevent save warnings
   vim.bo[state.shadow_buf].modified = false
+end
+
+---Flush any pending debounced shadow file write immediately
+---Call this before operations that need the file on disk (e.g., save, format)
+function M.flush_shadow_write(state)
+  if write_timer then
+    vim.fn.timer_stop(write_timer)
+    write_timer = nil
+  end
+  if state.shadow_buf and vim.api.nvim_buf_is_valid(state.shadow_buf) and state.shadow_path then
+    local all_lines = vim.api.nvim_buf_get_lines(state.shadow_buf, 0, -1, false)
+    vim.fn.writefile(all_lines, state.shadow_path)
+  end
 end
 
 return M

@@ -300,6 +300,9 @@ function M.format_cell(state, cell_idx, callback)
     return
   end
 
+  -- Flush any pending debounced shadow write before formatting
+  require('ipynb.lsp.shadow').flush_shadow_write(state)
+
   -- Build formatting request params
   local params = {
     textDocument = { uri = vim.uri_from_fname(state.shadow_path) },

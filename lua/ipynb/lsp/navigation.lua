@@ -131,9 +131,10 @@ function M.install()
     end
 
     -- Check if we're in an edit float and need to close it
-    if state and state.edit_state and state.edit_state.buf == current_buf then
-      local edit = state.edit_state
-      local parent_win = edit.parent_win
+    -- Capture flag BEFORE closing so jump_to_facade_and_edit can re-open it
+    local was_in_edit = state and state.edit_state and state.edit_state.buf == current_buf
+    if was_in_edit then
+      local parent_win = state.edit_state.parent_win
 
       -- Close the edit float
       require('ipynb.edit').close(state)
@@ -164,9 +165,8 @@ function M.install()
       vim.api.nvim_win_set_cursor(0, { facade_line, col })
 
       -- Re-enter edit float at the target location
-      -- NOTE: Only do this if we were in an edit float before navigation
+      -- Only do this if we were in an edit float before navigation
       -- If navigating from facade buffer, don't auto-open edit float
-      local was_in_edit = target_state.edit_state ~= nil
       if was_in_edit then
         vim.schedule(function()
           pcall(function()

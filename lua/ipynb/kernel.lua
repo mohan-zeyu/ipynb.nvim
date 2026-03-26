@@ -9,7 +9,7 @@ local M = {}
 ---@field kernel_id string|nil Kernel ID
 ---@field kernel_name string Kernel name (e.g., "python3")
 ---@field execution_state string Current state: "idle", "busy", "starting"
----@field pending_cells table<string, {cell_idx: number}> Cells waiting for execution
+---@field pending_cells table<string, {cell_idx: number}> Cells waiting for execution (keyed by cell.id)
 ---@field callbacks table Async operation callbacks
 
 ---Create a new kernel state for a notebook
@@ -53,14 +53,31 @@ local function send_command(state, cmd)
   return true
 end
 
+---Find cell index by cell ID
+---@param state NotebookState
+---@param cell_id string
+---@return number|nil cell_idx
+local function find_cell_by_id(state, cell_id)
+  if not cell_id or not state.cells then
+    return nil
+  end
+  for i, cell in ipairs(state.cells) do
+    if cell.id == cell_id then
+      return i
+    end
+  end
+  return nil
+end
+
 ---Update a cell field and re-render visuals
 ---@param state NotebookState
----@param cell_idx number
+---@param cell_id string Cell ID to look up
 ---@param field string
 ---@param value any
-local function update_cell_field(state, cell_idx, field, value)
+local function update_cell_field(state, cell_id, field, value)
   vim.schedule(function()
-    if state and state.cells and state.cells[cell_idx] then
+    local cell_idx = find_cell_by_id(state, cell_id)
+    if cell_idx then
       state.cells[cell_idx][field] = value
       require("ipynb.visuals").render_all(state)
     end
@@ -161,26 +178,30 @@ local function handle_message(state, msg)
 
   elseif msg_type == "status" then
     kernel.execution_state = msg.state or "idle"
-    if msg.cell_idx and type(msg.cell_idx) == "number" then
-      update_cell_field(state, msg.cell_idx, "execution_state", msg.state)
+    local cell_id = msg.cell_id
+    if cell_id then
+      update_cell_field(state, cell_id, "execution_state", msg.state)
       if msg.state == "idle" then
-        kernel.pending_cells[msg.cell_idx] = nil
+        kernel.pending_cells[cell_id] = nil
       end
     end
 
   elseif msg_type == "execute_input" then
-    if msg.cell_idx and msg.execution_count then
-      update_cell_field(state, msg.cell_idx, "execution_count", msg.execution_count)
+    local cell_id = msg.cell_id
+    if cell_id and msg.execution_count then
+      update_cell_field(state, cell_id, "execution_count", msg.execution_count)
     end
 
   elseif msg_type == "output" then
-    if msg.cell_idx and msg.output then
+    local cell_id = msg.cell_id
+    if cell_id and msg.output then
       vim.schedule(function()
-        if state.cells and state.cells[msg.cell_idx] then
-          local cell = state.cells[msg.cell_idx]
+        local cell_idx = find_cell_by_id(state, cell_id)
+        if cell_idx then
+          local cell = state.cells[cell_idx]
           cell.outputs = cell.outputs or {}
           table.insert(cell.outputs, msg.output)
-          require("ipynb.output").render_outputs(state, msg.cell_idx)
+          require("ipynb.output").render_outputs(state, cell_idx)
         end
       end)
     end
@@ -492,7 +513,7 @@ function M.execute(state, cell_idx)
   require("ipynb.output").clear_outputs(state, cell_idx)
 
   cell.execution_state = "busy"
-  state.kernel.pending_cells[cell_idx] = { cell_idx = cell_idx }
+  state.kernel.pending_cells[cell.id] = { cell_idx = cell_idx }
 
   require("ipynb.visuals").render_all(state)
 
@@ -500,6 +521,7 @@ function M.execute(state, cell_idx)
     action = "execute",
     code = cell.source,
     cell_idx = cell_idx,
+    cell_id = cell.id,
   })
 end
 

@@ -49,7 +49,11 @@ function M.render_output(output)
 
   if output.output_type == 'stream' then
     local text = to_string(output.text)
-    for line in text:gmatch('[^\n]+') do
+    -- Remove single trailing newline (output formatting), but preserve intentional blank lines
+    if text:sub(-1) == '\n' then
+      text = text:sub(1, -2)
+    end
+    for _, line in ipairs(vim.split(text, '\n', { plain = true })) do
       table.insert(lines, { { line, 'IpynbOutput' } })
     end
   elseif output.output_type == 'execute_result' then
@@ -119,7 +123,11 @@ function M.build_output_text(cell)
   for _, output in ipairs(cell.outputs) do
     if output.output_type == 'stream' then
       local text = to_string(output.text)
-      for line in text:gmatch('[^\n]+') do
+      -- Remove single trailing newline (output formatting), but preserve intentional blank lines
+      if text:sub(-1) == '\n' then
+        text = text:sub(1, -2)
+      end
+      for _, line in ipairs(vim.split(text, '\n', { plain = true })) do
         table.insert(lines, line)
       end
     elseif output.output_type == 'execute_result' then
